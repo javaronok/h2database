@@ -17,6 +17,7 @@ import java.sql.Statement;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.h2.api.ErrorCode;
@@ -111,6 +112,7 @@ public class TestCases extends TestBase {
         testConstraintReconnect();
         testCollation();
         testBinaryCollation();
+        testOrConditionByIndexPlan();
         deleteDb("cases");
     }
 
@@ -1924,4 +1926,48 @@ public class TestCases extends TestBase {
         assertEquals("%oo", rs.getString(1));
         conn.close();
     }
+
+    private void testOrConditionByIndexPlan() throws SQLException {
+        deleteDb("cases");
+        Connection conn = getConnection("cases");
+        Statement stat = conn.createStatement();
+
+        stat.execute("create table person(name varchar, age int)");
+        stat.execute("create index name_idx on person(name)");
+
+        ResultSet rs;
+        String plan;
+
+        rs = stat.executeQuery("explain SELECT * FROM PERSON WHERE name='Alexey'");
+        assertTrue(rs.next());
+        plan = rs.getString(1);
+        assertUsingIndex(plan, "name");
+        rs.close();
+
+        rs = stat.executeQuery("explain SELECT * FROM PERSON WHERE name='Alexey' and age='31'");
+        assertTrue(rs.next());
+        plan = rs.getString(1);
+        assertUsingIndex(plan, "name");
+        rs.close();
+
+        rs = stat.executeQuery("explain SELECT * FROM PERSON WHERE name='Alexey' or name='Dmitriy'");
+        assertTrue(rs.next());
+        plan = rs.getString(1);
+        assertUsingIndex(plan, "name");
+        rs.close();
+
+        rs = stat.executeQuery("explain SELECT * FROM PERSON WHERE (name='Alexey' or name='Dmitriy') and age='31'");
+        assertTrue(rs.next());
+        plan = rs.getString(1);
+        assertUsingIndex(plan, "name");
+        rs.close();
+
+        conn.close();
+    }
+
+    private void assertUsingIndex(String explainPlan, String field) {
+        assertTrue(explainPlan.contains(Objects.requireNonNull(field).toUpperCase() + "_IDX"));
+        assertFalse(explainPlan.contains("_SCAN_"));
+    }
+
 }
